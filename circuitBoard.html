@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinity Circuit Board</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        .title {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: #0ff;
+            font-size: 24px;
+            text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+            opacity: 0.7;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">INFINITY CIRCUIT BOARD</div>
+        <canvas id="circuitBoard"></canvas>
+    </div>
+
+    <script>
+        // Get canvas and context
+        const canvas = document.getElementById('circuitBoard');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas to full window size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Circuit board configuration
+        const config = {
+            gridSize: 40,
+            nodeRadius: 3,
+            pulseSpeed: 2,
+            pulseWidth: 4,
+            trailLength: 20,
+            connectionProbability: 0.6,
+            maxPulses: 50,
+            baseHue: 200,
+            hueShiftSpeed: 0.5
+        };
+
+        // Circuit components
+        const nodes = [];
+        const connections = [];
+        const pulses = [];
+        let hueOffset = 0;
+
+        // Node class
+        class Node {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.connections = [];
+                this.active = false;
+                this.activationTime = 0;
+                this.radius = config.nodeRadius;
+                this.glowIntensity = 0;
+            }
+            
+            activate() {
+                this.active = true;
+                this.activationTime = Date.now();
+                this.glowIntensity = 1;
+            }
+            
+            update() {
+                if (this.active) {
+                    const elapsed = Date.now() - this.activationTime;
+                    this.glowIntensity = Math.max(0, 1 - elapsed / 500);
+                    
+                    if (elapsed > 500) {
+                        this.active = false;
+                    }
+                }
+            }
+            
+            draw() {
+                // Draw node glow
+                if (this.glowIntensity > 0) {
+                    const gradient = ctx.createRadialGradient(
+                        this.x, this.y, 0,
+                        this.x, this.y, this.radius * 8
+                    );
+                    gradient.addColorStop(0, `hsla(${config.baseHue}, 100%, 70%, ${this.glowIntensity})`);
+                    gradient.addColorStop(1, 'transparent');
+                    
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius * 8, 0, Math.PI * 2);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                }
+                
+                // Draw node
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.active ? 
+                    `hsl(${config.baseHue}, 100%, 70%)` : 
+                    `hsla(${config.baseHue}, 60%, 40%, 0.7)`;
+                ctx.fill();
+                
+                // Draw inner highlight
+                if (this.active) {
+                    ctx.beginPath();
+                    ctx.arc(this.x - this.radius/3, this.y - this.radius/3, this.radius/2, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.fill();
+                }
+            }
+        }
+
+        // Connection class
+        class Connection {
+            constructor(node1, node2) {
+                this.node1 = node1;
+                this.node2 = node2;
+                this.length = Math.sqrt(
+                    Math.pow(node2.x - node1.x, 2) + 
+                    Math.pow(node2.y - node1.y, 2)
+                );
+                node1.connections.push(this);
+                node2.connections.push(this);
+            }
+            
+            draw() {
+                ctx.beginPath();
+                ctx.moveTo(this.node1.x, this.node1.y);
+                ctx.lineTo(this.node2.x, this.node2.y);
+                
+                // Style based on activity
+                const active = this.node1.active || this.node2.active;
+                ctx.strokeStyle = active ? 
+                    `hsla(${config.baseHue}, 100%, 70%, 0.8)` : 
+                    `hsla(${config.baseHue}, 40%, 30%, 0.3)`;
+                ctx.lineWidth = active ? 2 : 1;
+                ctx.stroke();
+            }
+        }
+
+        // Pulse class
+        class Pulse {
+            constructor(connection, startNode) {
+                this.connection = connection;
+                this.progress = 0;
+                this.startNode = startNode;
+                this.endNode = startNode === connection.node1 ? connection.node2 : connection.node1;
+                this.width = config.pulseWidth;
+                this.trail = [];
+                this.hue = config.baseHue;
+                this.speed = config.pulseSpeed / connection.length;
+            }
+            
+            update() {
+                // Update position
+                this.progress += this.speed;
+                
+                // Record trail position
+                const x = this.startNode.x + (this.endNode.x - this.startNode.x) * this.progress;
+                const y = this.startNode.y + (this.endNode.y - this.startNode.y) * this.progress;
+                
+                this.trail.push({x, y, width: this.width});
+                if (this.trail.length > config.trailLength) {
+                    this.trail.shift();
+                }
+                
+                // Reduce width over time
+                this.width = Math.max(1, config.pulseWidth * (1 - this.progress));
+                
+                // Check if pulse reached the end
+                if (this.progress >= 1) {
+                    // Activate the end node
+                    this.endNode.activate();
+                    
+                    // Possibly create new pulses from the end node
+                    if (Math.random() > 0.3 && pulses.length < config.maxPulses) {
+                        const availableConnections = this.endNode.connections.filter(
+                            conn => conn !== this.connection
+                        );
+                        
+                        if (availableConnections.length > 0) {
+                            const randomConn = availableConnections[
+                                Math.floor(Math.random() * availableConnections.length)
+                            ];
+                            pulses.push(new Pulse(randomConn, this.endNode));
+                        }
+                    }
+                    
+                    return true; // Signal to remove this pulse
+                }
+                
+                return false;
+            }
+            
+            draw() {
+                // Draw pulse trail
+                for (let i = 0; i < this.trail.length; i++) {
+                    const point = this.trail[i];
+                    const alpha = i / this.trail.length;
+                    const radius = point.width * alpha;
+                    
+                    const gradient = ctx.createRadialGradient(
+                        point.x, point.y, 0,
+                        point.x, point.y, radius * 3
+                    );
+                    gradient.addColorStop(0, `hsla(${this.hue}, 100%, 70%, ${alpha})`);
+                    gradient.addColorStop(1, 'transparent');
+                    
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, radius * 3, 0, Math.PI * 2);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                    
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${this.hue}, 100%, 70%, ${alpha})`;
+                    ctx.fill();
+                }
+                
+                // Draw main pulse
+                const x = this.startNode.x + (this.endNode.x - this.startNode.x) * this.progress;
+                const y = this.startNode.y + (this.endNode.y - this.startNode.y) * this.progress;
+                
+                const gradient = ctx.createRadialGradient(
+                    x, y, 0,
+                    x, y, this.width * 4
+                );
+                gradient.addColorStop(0, `hsla(${this.hue}, 100%, 70%, 1)`);
+                gradient.addColorStop(1, 'transparent');
+                
+                ctx.beginPath();
+                ctx.arc(x, y, this.width * 4, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                ctx.beginPath();
+                ctx.arc(x, y, this.width, 0, Math.PI * 2);
+                ctx.fillStyle = `hsl(${this.hue}, 100%, 70%)`;
+                ctx.fill();
+            }
+        }
+
+        // Initialize circuit board
+        function initializeCircuit() {
+            nodes.length = 0;
+            connections.length = 0;
+            pulses.length = 0;
+            
+            // Create grid of nodes
+            const cols = Math.ceil(canvas.width / config.gridSize);
+            const rows = Math.ceil(canvas.height / config.gridSize);
+            
+            for (let x = 0; x < cols; x++) {
+                for (let y = 0; y < rows; y++) {
+                    // Add some randomness to position for organic feel
+                    const posX = x * config.gridSize + (Math.random() - 0.5) * config.gridSize * 0.3;
+                    const posY = y * config.gridSize + (Math.random() - 0.5) * config.gridSize * 0.3;
+                    
+                    nodes.push(new Node(posX, posY));
+                }
+            }
+            
+            // Create connections between nearby nodes
+            for (let i = 0; i < nodes.length; i++) {
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const dx = nodes[i].x - nodes[j].x;
+                    const dy = nodes[i].y - nodes[j].y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Connect nodes that are close and based on probability
+                    if (distance < config.gridSize * 1.8 && Math.random() < config.connectionProbability) {
+                        connections.push(new Connection(nodes[i], nodes[j]));
+                    }
+                }
+            }
+            
+            // Start with a few random pulses
+            for (let i = 0; i < 5; i++) {
+                const randomNode = nodes[Math.floor(Math.random() * nodes.length)];
+                if (randomNode.connections.length > 0) {
+                    const randomConn = randomNode.connections[
+                        Math.floor(Math.random() * randomNode.connections.length)
+                    ];
+                    pulses.push(new Pulse(randomConn, randomNode));
+                    randomNode.activate();
+                }
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            // Clear canvas with a subtle fade effect
+            ctx.fillStyle = 'rgba(0, 5, 10, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Update hue for color cycling
+            hueOffset += config.hueShiftSpeed;
+            config.baseHue = (200 + Math.sin(hueOffset * 0.01) * 30) % 360;
+            
+            // Update and draw connections
+            connections.forEach(conn => conn.draw());
+            
+            // Update and draw nodes
+            nodes.forEach(node => {
+                node.update();
+                node.draw();
+            });
+            
+            // Update and draw pulses
+            for (let i = pulses.length - 1; i >= 0; i--) {
+                if (pulses[i].update()) {
+                    pulses.splice(i, 1);
+                } else {
+                    pulses[i].draw();
+                }
+            }
+            
+            // Occasionally add new pulses if running low
+            if (pulses.length < 3 && Math.random() > 0.98) {
+                const randomNode = nodes[Math.floor(Math.random() * nodes.length)];
+                if (randomNode.connections.length > 0) {
+                    const randomConn = randomNode.connections[
+                        Math.floor(Math.random() * randomNode.connections.length)
+                    ];
+                    pulses.push(new Pulse(randomConn, randomNode));
+                    randomNode.activate();
+                }
+            }
+            
+            requestAnimationFrame(animate);
+        }
+
+        // Initialize and start animation
+        initializeCircuit();
+        animate();
+
+        // Reinitialize on resize for better layout
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            initializeCircuit();
+        });
+    </script>
+</body>
+</html>
